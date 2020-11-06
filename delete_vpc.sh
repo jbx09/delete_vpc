@@ -5,6 +5,10 @@
 #create date : May 23, 2020
 #modify date : Jun 7, 2020
 
+#Forked made changes:
+#mode date : Nov 6, 2020
+#modified author: Balaji
+
 set -e
 
 if [ -z "$1" ]; then
@@ -237,6 +241,38 @@ do
     aws ec2 delete-network-interface \
         --network-interface-id ${nic} \
         --region ${AWS_REGION} > /dev/null
+done
+
+# Delete Security Group rules to get rid of
+# nested security group dependencies
+echo "Process of Security Group Rules..."
+for sg in $(aws ec2 describe-security-groups \
+    --filters 'Name=vpc-id,Values='${VPC_ID} \
+    --query 'SecurityGroups[].GroupId' \
+    --output text --region ${AWS_REGION})
+do
+    # Check it's default security group
+    sg_name=$(aws ec2 describe-security-groups \
+        --group-ids ${sg} --query 'SecurityGroups[].GroupName' \
+        --output text --region ${AWS_REGION})
+    # Ignore default security group
+    if [ "$sg_name" = 'default' ] || [ "$sg_name" = 'Default' ]; then
+        continue
+    fi
+
+    echo "    delete Security group Rules of $sg"
+    IpPermissionEgress=$(aws ec2 describe-security-groups \
+        --group-ids ${sg} --query 'SecurityGroups[0].IpPermissionsEgress[*]')
+    if [ "${IpPermissionEgress}" != "[]" ]; then
+        aws ec2 revoke-security-group-egress --group-id ${sg} \
+            --ip-permissions "${IpPermissionEgress}"
+    fi
+    IpPermissionIngress=$(aws ec2 describe-security-groups \
+        --group-ids ${sg} --query 'SecurityGroups[0].IpPermissions[*]')
+    if [ "${IpPermissionIngress}" != "[]" ]; then
+        aws ec2 revoke-security-group-ingress --group-id ${sg} \
+            --ip-permissions "${IpPermissionIngress}"
+    fi
 done
 
 # Delete Security Group
